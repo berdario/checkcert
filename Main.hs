@@ -13,16 +13,13 @@ import Text.Regex.TDFA.Common
 import Data.Conduit.Shell (run, proc, conduit, ($|), Segment)
 import Conduit (foldC)
 
-type Port = Word16
-
 emptyInput = conduit mempty
 
-tlsConnect :: String -> Maybe Port -> Segment ()
-tlsConnect hostname mPort = proc "openssl" ["s_client", "-showcerts", "-connect", host]
-  where
-    host = hostname <> ":" <> (show $ fromMaybe 443 mPort)
+tlsConnect :: String -> Segment ()
+tlsConnect host = proc "openssl" ["s_client", "-showcerts", "-connect", host]
 
-dumpCerts host port = emptyInput $| tlsConnect host port $| conduit foldC
+dumpCerts host = emptyInput $| tlsConnect host
+dumpCerts' host = dumpCerts host $| conduit foldC
 
 extractCert :: ByteString -> ByteString
 extractCert dump = cert
@@ -46,9 +43,10 @@ checkFingerprint hash (Just expected) = do
     then putStrLn "OK! Fingerprints match"
     else fail $ unpack $ "Failure! Fingerprint differs:\n" <> hash
 
-main = do (root, host, expected) <- fmap prepareArgs getArgs
-          cert <- fmap extractCert $ run $ dumpCerts host Nothing
-          writeFile "/tmp/tempdownloadedcert" cert
+main = do (root, host, expected) <- fmap prepareArgs getArgs -- TODO use optparse-applicative?
+          run $ dumpCerts host -- process could get stuck otherwise... only happens with manfileserver.pentest.ngs?
+          cert <- fmap extractCert $ run $ dumpCerts' host
+          writeFile "/tmp/tempdownloadedcert" cert -- TODO use System.IO.Temp.systemTempFile
           hash <- run $ do verifyCert root "/tmp/tempdownloadedcert"
                            fingerprint "/tmp/tempdownloadedcert"
           let sha256 = split '=' (head $ split '\n' hash) !! 1
